@@ -11,7 +11,7 @@ from ai_service.errors import ProviderUnavailableError, ProviderTimeoutError, Pr
 logger = logging.getLogger("ai_service.providers.openrouter")
 
 class OpenRouterProvider(LLMProvider):
-    MODEL = "thudm/glm-4.5-air"
+    MODEL = "z-ai/glm-4.5-air:free"
     BASE_URL = "https://openrouter.ai/api/v1"
 
     def __init__(self):

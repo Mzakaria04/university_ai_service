@@ -29,21 +29,35 @@ class ConversationOrchestrator:
         Yields raw text chunks to stream.
         At the end of the loop, persists the final assistant response to the database.
         """
-        # 1. Build the system prompt
-        system_prompt = PromptBuilder.build_system_prompt(user_context)
+        # 1. Load history from database
+        from ai_service.memory.short_term import ShortTermMemory
+        from ai_service.memory.composer import MemoryComposer
         
-        # 2. Set up initial messages list for LLM context
-        # (Only the system prompt and the current user query, as per Phase 1 requirements:
-        # "no memory summarization, only current user message and system prompt")
-        messages = [
-            Message(role="system", content=system_prompt),
-            Message(role="user", content=user_message_content)
-        ]
+        memory_service = ShortTermMemory()
+        history_messages = await memory_service.load(db, session_id)
         
-        # 3. Retrieve authorized tools for user's role
+        # Check if the last message in history is the current user query to prevent duplication or omission
+        if not history_messages or history_messages[-1].role != "user" or history_messages[-1].content != user_message_content:
+            history_messages.append(Message(role="user", content=user_message_content))
+            
+        # Get past history (everything except the current user message) for the system prompt
+        past_history = history_messages[:-1]
+        memory_context = MemoryComposer.compose_context_block(past_history)
+        
+        # 2. Retrieve authorized tools for user's role
         authorized_tools = ToolRegistry.get_authorized_tools(user_context.role)
         
-        # 4. Agentic execution loop (max 5 iterations)
+        # 3. Build the system prompt
+        system_prompt = PromptBuilder.build_system_prompt(
+            user_context=user_context,
+            authorized_tools=authorized_tools,
+            memory_context=memory_context
+        )
+        
+        # 4. Set up messages list for LLM context (system prompt + history/current user messages)
+        messages = [Message(role="system", content=system_prompt)] + history_messages
+        
+        # 5. Agentic execution loop (max 5 iterations)
         MAX_ITERATIONS = 5
         tool_executor = ToolExecutor(db)
         final_assistant_content = ""
@@ -64,6 +78,16 @@ class ConversationOrchestrator:
                 assistant_msg = response.as_assistant_message()
                 messages.append(assistant_msg)
                 
+                # Persist tool_call message event to DB
+                await MessagePersistence.save_message(
+                    db=db,
+                    session_id=session_id,
+                    role=assistant_msg.role,
+                    content=assistant_msg.content,
+                    message_type=assistant_msg.message_type,
+                    metadata_json=assistant_msg.metadata_json
+                )
+                
                 # Execute tool calls
                 for tool_call in response.tool_calls:
                     logger.info(f"Executing tool {tool_call.name} (id={tool_call.id}) in loop")
@@ -75,9 +99,9 @@ class ConversationOrchestrator:
                     
                     # Serialize result content as JSON
                     if tool_result.success:
-                        content_str = json.dumps(tool_result.data)
+                        content_str = json.dumps(tool_result.data, ensure_ascii=False)
                     else:
-                        content_str = json.dumps({"error": tool_result.error_message})
+                        content_str = json.dumps({"error": tool_result.error_message}, ensure_ascii=False)
                     
                     # Append tool response message to context history
                     tool_msg = Message(
@@ -88,6 +112,17 @@ class ConversationOrchestrator:
                         tool_name=tool_call.name
                     )
                     messages.append(tool_msg)
+                    
+                    # Persist tool_result message event to DB
+                    await MessagePersistence.save_message(
+                        db=db,
+                        session_id=session_id,
+                        role=tool_msg.role,
+                        content=tool_msg.content,
+                        message_type=tool_msg.message_type,
+                        tool_call_id=tool_msg.tool_call_id,
+                        tool_name=tool_msg.tool_name
+                    )
                 
                 # Continue loop to feed the tool responses back to the LLM
                 continue
@@ -105,8 +140,8 @@ class ConversationOrchestrator:
             error_msg = "Agentic execution loop exceeded maximum tool calling rounds (5)."
             logger.error(error_msg)
             raise RuntimeError(error_msg)
-
-        # 5. Persist the final response text to database (only if we got content)
+            
+        # 6. Persist the final response text to database (only if we got content)
         if final_assistant_content:
             try:
                 await MessagePersistence.save_message(

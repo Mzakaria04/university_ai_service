@@ -188,20 +188,29 @@ async def test_chat_streaming_e2e(setup_db):
             assert text_result == "Your GPA is 4.0."
             
             # Assert message persistence in DB
-            # We expect 2 messages: 1 user, 1 assistant (tool calls/results are not persisted in Phase 1 per spec)
+            # We expect 4 messages in Phase 2: 1 user, 1 assistant (tool_call), 1 tool (tool_result), 1 assistant (text)
             async with AsyncSessionLocal() as session:
                 q = select(AIMessageEvent).where(AIMessageEvent.session_id == session_id).order_by(AIMessageEvent.sequence_number)
                 res = await session.execute(q)
                 messages = res.scalars().all()
                 
-                assert len(messages) == 2
+                assert len(messages) == 4
                 assert messages[0].role == "user"
                 assert messages[0].content == "What is my GPA?"
                 assert messages[0].sequence_number == 1
                 
                 assert messages[1].role == "assistant"
-                assert messages[1].content == "Your GPA is 4.0."
+                assert messages[1].message_type == "tool_call"
                 assert messages[1].sequence_number == 2
+                
+                assert messages[2].role == "tool"
+                assert messages[2].message_type == "tool_result"
+                assert messages[2].sequence_number == 3
+                
+                assert messages[3].role == "assistant"
+                assert messages[3].message_type == "text"
+                assert messages[3].content == "Your GPA is 4.0."
+                assert messages[3].sequence_number == 4
 
 
 async def test_chat_ownership_validation_e2e(setup_db):
