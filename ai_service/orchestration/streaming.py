@@ -16,7 +16,7 @@ def format_sse_chunk(content: str) -> str:
             }
         ]
     }
-    return f"data: {json.dumps(payload)}\n\n"
+    return f"data: {json.dumps(payload,ensure_ascii=False)}\n\n"
 
 def format_sse_done() -> str:
     """
@@ -38,4 +38,4 @@ def format_sse_error(error_message: str) -> str:
             "type": "orchestration_error"
         }
     }
-    return f"data: {json.dumps(payload)}\n\n"
+    return f"data: {json.dumps(payload,ensure_ascii=False)}\n\n"

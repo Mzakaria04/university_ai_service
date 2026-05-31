@@ -4,7 +4,7 @@ from datetime import datetime
 
 from ai_service.db.models import AISession
 from ai_service.models.user_context import UserContext
-from ai_service.errors import SessionOwnershipError
+from ai_service.errors import SessionOwnershipError, SessionNotFoundError
 
 class SessionManager:
     @staticmethod
@@ -15,7 +15,7 @@ class SessionManager:
     ) -> AISession:
         """
         Loads an existing session from the database or creates a new one lazily.
-        Ensures the requesting user owns the session if it already exists.
+        Ensures the requesting user owns the session if it already exists and is active.
         """
         # Query for session by ID
         query = select(AISession).where(AISession.id == session_id)
@@ -23,6 +23,12 @@ class SessionManager:
         session_record = result.scalars().first()
 
         if session_record:
+            # Check soft deletion
+            if session_record.metadata_json and session_record.metadata_json.get("is_deleted"):
+                raise SessionNotFoundError(
+                    f"Session {session_id} not found"
+                )
+
             # Check ownership (JWT user_id must match session's user_id)
             if session_record.user_id != user_context.user_id:
                 raise SessionOwnershipError(

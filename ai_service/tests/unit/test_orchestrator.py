@@ -193,15 +193,17 @@ async def test_orchestrator_with_tool_execution(db_session):
     assert "cumulative_gpa" in history[3].content
     assert "4.0" in history[3].content
 
-    # Confirm assistant response was written to database
+    # Confirm assistant responses were written to database
     query = select(AIMessageEvent).where(
         AIMessageEvent.session_id == session_id,
         AIMessageEvent.role == "assistant"
-    )
+    ).order_by(AIMessageEvent.sequence_number)
     res = await db_session.execute(query)
     messages_db = res.scalars().all()
-    assert len(messages_db) == 1
-    assert messages_db[0].content == "Your GPA is 4.0."
+    assert len(messages_db) == 2
+    assert messages_db[0].message_type == "tool_call"
+    assert messages_db[1].message_type == "text"
+    assert messages_db[1].content == "Your GPA is 4.0."
 
 
 async def test_orchestrator_max_iterations_bound(db_session):

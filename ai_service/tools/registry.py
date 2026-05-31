@@ -4,9 +4,26 @@ from ai_service.tools.base import ToolDefinition
 ROLE_TOOL_PERMISSIONS: dict[UserRole, set[str]] = {
     UserRole.STUDENT: {
         "get_my_gpa",
+        "get_my_schedule",
+        "get_my_transcript",
+        "get_my_attendance",
+        "faculty_bylaw_search",
     },
-    UserRole.INSTRUCTOR: set(),
-    UserRole.ADMIN: set(),
+    UserRole.INSTRUCTOR: {
+        "get_course_students",
+        "get_student_progress",
+        "get_course_attendance",
+        "get_my_schedule",
+        "faculty_bylaw_search",
+    },
+    UserRole.ADMIN: {
+        "get_registration_statistics",
+        "get_all_students",
+        "get_course_students",
+        "get_student_progress",
+        "get_course_attendance",
+        "faculty_bylaw_search",
+    },
 }
 
 class ToolRegistry:

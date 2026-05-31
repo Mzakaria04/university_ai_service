@@ -36,8 +36,27 @@ async def lifespan(app: FastAPI):
     # Register tools in the registry
     from ai_service.tools.registry import ToolRegistry
     from ai_service.tools.student.gpa import gpa_tool_definition
+    from ai_service.tools.rag.faculty_bylaw_search import bylaw_tool_definition
+    from ai_service.tools.student.schedule import schedule_tool_definition
+    from ai_service.tools.student.transcript import transcript_tool_definition
+    from ai_service.tools.student.attendance import attendance_tool_definition
+    from ai_service.tools.instructor.course_students import course_students_tool_definition
+    from ai_service.tools.instructor.student_progress import student_progress_tool_definition
+    from ai_service.tools.instructor.course_attendance import course_attendance_tool_definition
+    from ai_service.tools.admin.registration_statistics import registration_statistics_tool_definition
+    from ai_service.tools.admin.all_students import all_students_tool_definition
+    
     ToolRegistry.register(gpa_tool_definition)
-    logger.info("Successfully registered core tools.")
+    ToolRegistry.register(bylaw_tool_definition)
+    ToolRegistry.register(schedule_tool_definition)
+    ToolRegistry.register(transcript_tool_definition)
+    ToolRegistry.register(attendance_tool_definition)
+    ToolRegistry.register(course_students_tool_definition)
+    ToolRegistry.register(student_progress_tool_definition)
+    ToolRegistry.register(course_attendance_tool_definition)
+    ToolRegistry.register(registration_statistics_tool_definition)
+    ToolRegistry.register(all_students_tool_definition)
+    logger.info("Successfully registered core, instructor, and admin tools.")
         
     yield
     
@@ -60,9 +79,11 @@ app.add_middleware(RequestIdMiddleware)
 # Mount API Routers
 from ai_service.api.v1.sessions import router as sessions_router
 from ai_service.api.v1.chat import router as chat_router
+from ai_service.api.v1.feedback import router as feedback_router
 
 app.include_router(sessions_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
+app.include_router(feedback_router, prefix="/api/v1")
 
 # Exception Handlers
 from fastapi.responses import JSONResponse

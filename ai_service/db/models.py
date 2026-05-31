@@ -93,3 +93,17 @@ class AIMessageEvent(Base):
 
     # Relationships
     session = relationship("AISession", back_populates="messages")
+
+
+class AIFeedback(Base):
+    __tablename__ = "ai_feedback"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    message_event_id = Column(Text, ForeignKey("ai_message_events.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Text, nullable=False)  # References User.id
+    is_positive = Column(Boolean, nullable=False)
+    comment = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    # Relationships
+    message_event = relationship("AIMessageEvent")

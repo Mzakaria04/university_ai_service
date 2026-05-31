@@ -47,8 +47,11 @@ class ToolExecutor:
         safe_args["user_id"] = user_context.user_id
 
         # Step 4: Execute with retry and timeout
+        from ai_service.errors import AuthorizationError
         try:
             result = await self._execute_with_retry(tool_def, safe_args)
+        except AuthorizationError as e:
+            raise e
         except Exception as e:
             latency_ms = (time.monotonic() - start_time) * 1000
             logger.error(f"Tool {tool_name} execution failed in executor: {e}")
@@ -69,6 +72,7 @@ class ToolExecutor:
         tool_def: ToolDefinition,
         args: dict
     ) -> ToolResult:
+        from ai_service.errors import AuthorizationError
         last_error = None
         for attempt in range(tool_def.max_retries + 1):
             try:
@@ -82,6 +86,9 @@ class ToolExecutor:
                     f"Tool {tool_def.name} execution timed out after {tool_def.timeout_seconds}s"
                 )
                 logger.warning(f"Attempt {attempt + 1} for tool {tool_def.name} timed out.")
+            except AuthorizationError as e:
+                # Propagate authorization error immediately without retry
+                raise e
             except Exception as e:
                 last_error = e
                 logger.error(f"Attempt {attempt + 1} for tool {tool_def.name} raised exception: {e}")
