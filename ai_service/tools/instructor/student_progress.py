@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 import logging
 
-from ai_service.tools.base import ToolResult, ToolDefinition, ToolDomain
+from ai_service.tools.base import ToolResult, ToolDefinition, ToolDomain, ToolParameter
 from ai_service.models.user_context import UserRole
 from ai_service.errors import ToolAuthorizationError
 
@@ -10,8 +10,8 @@ logger = logging.getLogger("ai_service.tools.student_progress")
 
 class GetStudentProgressTool:
     """
-    Tool implementation to retrieve a student's grade records and academic progress.
-    Enforces instructor assignment checks; ADMIN role has broad access.
+    Tool implementation to retrieve a student's grades and progress details in a course section.
+    Instructors can only query sections they teach. Admins have global access.
     """
 
     async def execute(self, db: AsyncSession, user_id: str, student_id: str, course_offering_id: str) -> ToolResult:
@@ -30,58 +30,51 @@ class GetStudentProgressTool:
 
             role_str = str(role).upper()
 
-            # 2. Contextual authorization check for instructors
+            # 2. Authorization & Context check
             if role_str == "INSTRUCTOR":
-                ci_query = text("""
+                check_query = text("""
                     SELECT 1 FROM "CourseInstructor" 
-                    WHERE "courseOfferingId" = :course_offering_id 
-                      AND "instructorId" = :user_id
+                    WHERE "instructorId" = :user_id AND "courseOfferingId" = :course_offering_id
                 """)
-                ci_res = await db.execute(ci_query, {"course_offering_id": course_offering_id, "user_id": user_id})
-                if not ci_res.scalar():
+                check_res = await db.execute(check_query, {"user_id": user_id, "course_offering_id": course_offering_id})
+                if not check_res.scalar():
                     raise ToolAuthorizationError(
-                        f"Instructor {user_id} is not authorized to access course offering {course_offering_id}."
+                        f"Instructor {user_id} is not assigned to course offering {course_offering_id}."
                     )
-            elif role_str != "ADMIN":
-                raise ToolAuthorizationError(f"Role {role_str} is not authorized to use get_student_progress.")
+            elif role_str == "ADMIN":
+                # Admins have global access
+                pass
+            else:
+                raise ToolAuthorizationError(f"Role {role_str} is not authorized to retrieve student progress.")
 
-            # 3. Retrieve student full name
-            s_query = text('SELECT "fullName" FROM "User" WHERE id = :student_id')
-            s_res = await db.execute(s_query, {"student_id": student_id})
-            student_name = s_res.scalar()
+            # 3. Retrieve student's full name
+            student_name_query = text('SELECT "fullName" FROM "User" WHERE id = :student_id')
+            student_name_res = await db.execute(student_name_query, {"student_id": student_id})
+            student_name = student_name_res.scalar() or "Unknown Student"
 
-            if not student_name:
-                return ToolResult(
-                    success=False,
-                    data=None,
-                    error_message=f"Student {student_id} not found."
-                )
-
-            # 4. Retrieve student grade records
+            # 4. Retrieve student grades/record
             query = text("""
                 SELECT 
-                    gi.name AS item_name,
-                    gi.type AS item_type,
-                    gr.score AS score,
-                    gi."maxScore" AS max_score,
-                    gi.weight AS weight
-                FROM "GradeItem" gi
-                LEFT JOIN "GradeRecord" gr ON gi.id = gr."gradeItemId" AND gr."studentId" = :student_id
-                WHERE gi."courseOfferingId" = :course_offering_id
-                ORDER BY gi.name
+                    gi.name AS assessment_name,
+                    gi.weight AS assessment_weight,
+                    gi."maxScore" AS max_possible_grade,
+                    gr.score AS grade_earned
+                FROM "GradeRecord" gr
+                JOIN "GradeItem" gi ON gr."gradeItemId" = gi.id
+                WHERE gr."studentId" = :student_id AND gi."courseOfferingId" = :course_offering_id
             """)
             
-            result = await db.execute(query, {"course_offering_id": course_offering_id, "student_id": student_id})
+            result = await db.execute(query, {"student_id": student_id, "course_offering_id": course_offering_id})
             rows = result.mappings().all()
 
             grades = []
             for r in rows:
                 grades.append({
-                    "item_name": r["item_name"],
-                    "item_type": r["item_type"],
-                    "score": float(r["score"]) if r["score"] is not None else None,
-                    "max_score": float(r["max_score"]),
-                    "weight": float(r["weight"])
+                    "assessment_name": r["assessment_name"],
+                    "weight_percentage": float(r["assessment_weight"]) if r["assessment_weight"] is not None else None,
+                    "max_grade": float(r["max_possible_grade"]) if r["max_possible_grade"] is not None else None,
+                    "grade_earned": float(r["grade_earned"]) if r["grade_earned"] is not None else None,
+                    "feedback": None
                 })
 
             return ToolResult(
@@ -90,7 +83,17 @@ class GetStudentProgressTool:
                     "student_id": student_id,
                     "student_name": student_name,
                     "course_offering_id": course_offering_id,
-                    "grades": grades
+                    "assessments": grades,
+                    "grades": [
+                        {
+                            "item_name": g["assessment_name"],
+                            "score": g["grade_earned"],
+                            "max_score": g["max_grade"],
+                            "weight": g["weight_percentage"],
+                            "feedback": g["feedback"]
+                        }
+                        for g in grades
+                    ]
                 }
             )
 
@@ -110,26 +113,25 @@ student_progress_tool_instance = GetStudentProgressTool()
 student_progress_tool_definition = ToolDefinition(
     name="get_student_progress",
     description=(
-        "Retrieve academic progress and scores of a specific student for a course offering, "
-        "including scores on individual assignments, quizzes, and exams. "
+        "Retrieve detailed coursework, midterm, final, and overall grades for a student in a specific course offering. "
         "Instructors can only query students in sections they teach; "
         "Admins can query any student."
     ),
     domain=ToolDomain.DATABASE,
     allowed_roles={UserRole.INSTRUCTOR, UserRole.ADMIN},
     parameters=[
-        {
-            "name": "student_id",
-            "type": "string",
-            "description": "The unique student ID (UUID) to query progress for.",
-            "required": True
-        },
-        {
-            "name": "course_offering_id",
-            "type": "string",
-            "description": "The unique course offering ID to query grades for.",
-            "required": True
-        }
+        ToolParameter(
+            name="student_id",
+            type="string",
+            description="The unique student ID (UUID) to query progress for.",
+            required=True
+        ),
+        ToolParameter(
+            name="course_offering_id",
+            type="string",
+            description="The unique course offering ID to query grades for.",
+            required=True
+        )
     ],
     handler=student_progress_tool_instance.execute,
     timeout_seconds=5.0,

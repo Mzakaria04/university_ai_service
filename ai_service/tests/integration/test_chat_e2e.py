@@ -16,6 +16,12 @@ from ai_service.sessions.manager import SessionManager
 from ai_service.models.user_context import UserContext, UserRole
 from sqlalchemy import text, select
 
+# Register tools explicitly for test environment
+from ai_service.tools.registry import ToolRegistry
+from ai_service.tools.student.gpa import gpa_tool_definition
+ToolRegistry.register(gpa_tool_definition)
+
+
 pytestmark = pytest.mark.anyio
 
 @pytest.fixture
@@ -43,9 +49,18 @@ def create_token(user_id: str, role: str = "STUDENT") -> str:
 async def setup_db():
     """Cleans and populates database with test data, committing transactions to make them visible globally."""
     async with AsyncSessionLocal() as session:
-        # Clean up database
+        # Clean up database in reverse-dependency order
         await session.execute(text('DELETE FROM "Transcript"'))
         await session.execute(text('DELETE FROM student_profiles'))
+        await session.execute(text('DELETE FROM "CourseInstructor"'))
+        await session.execute(text('DELETE FROM "Attendance"'))
+        await session.execute(text('DELETE FROM "AttendanceSession"'))
+        await session.execute(text('DELETE FROM "SessionSchedule"'))
+        await session.execute(text('DELETE FROM "Session"'))
+        await session.execute(text('DELETE FROM "Room"'))
+        await session.execute(text('DELETE FROM "Building"'))
+        await session.execute(text('DELETE FROM "Enrollment"'))
+        await session.execute(text('DELETE FROM "CourseOffering"'))
         await session.execute(text('DELETE FROM "Course"'))
         await session.execute(text('DELETE FROM "Term"'))
         await session.execute(text('DELETE FROM ai_message_events'))
@@ -93,9 +108,18 @@ async def setup_db():
     yield
 
     async with AsyncSessionLocal() as session:
-        # Clean up database again
+        # Clean up database in reverse-dependency order
         await session.execute(text('DELETE FROM "Transcript"'))
         await session.execute(text('DELETE FROM student_profiles'))
+        await session.execute(text('DELETE FROM "CourseInstructor"'))
+        await session.execute(text('DELETE FROM "Attendance"'))
+        await session.execute(text('DELETE FROM "AttendanceSession"'))
+        await session.execute(text('DELETE FROM "SessionSchedule"'))
+        await session.execute(text('DELETE FROM "Session"'))
+        await session.execute(text('DELETE FROM "Room"'))
+        await session.execute(text('DELETE FROM "Building"'))
+        await session.execute(text('DELETE FROM "Enrollment"'))
+        await session.execute(text('DELETE FROM "CourseOffering"'))
         await session.execute(text('DELETE FROM "Course"'))
         await session.execute(text('DELETE FROM "Term"'))
         await session.execute(text('DELETE FROM ai_message_events'))

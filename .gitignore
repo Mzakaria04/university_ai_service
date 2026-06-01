@@ -11,3 +11,8 @@ node_modules/
 postman/
 postman_collection/
 dist/
+docker_logs/
+docker-compose.yml
+docker-compose.prod.yml
+Dockerfile
+docs/

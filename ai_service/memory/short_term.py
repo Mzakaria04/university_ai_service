@@ -36,6 +36,8 @@ class ShortTermMemory:
         query = (
             select(AIMessageEvent)
             .where(AIMessageEvent.session_id == session_id)
+            .where(AIMessageEvent.is_summarized == False)
+            .where(AIMessageEvent.message_type != "summary")
             .order_by(AIMessageEvent.sequence_number.desc())
             .limit(self.max_messages)
         )

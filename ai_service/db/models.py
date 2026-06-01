@@ -107,3 +107,44 @@ class AIFeedback(Base):
 
     # Relationships
     message_event = relationship("AIMessageEvent")
+
+
+class AIToolExecutionLog(Base):
+    __tablename__ = "ai_tool_execution_logs"
+
+    id = Column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id = Column(Text, ForeignKey("ai_sessions.id", ondelete="CASCADE"), nullable=True)
+    message_event_id = Column(Text, ForeignKey("ai_message_events.id", ondelete="SET NULL"), nullable=True)
+    tool_name = Column(String, nullable=False)
+    user_id = Column(String, nullable=False)
+    user_role = Column(String, nullable=False)
+    arguments_json = Column(JSONB, nullable=True)
+    result_json = Column(JSONB, nullable=True)
+    success = Column(Boolean, nullable=False)
+    error_message = Column(Text, nullable=True)
+    attempt_number = Column(Integer, nullable=False)
+    latency_ms = Column(Integer, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class AIExecutionTrace(Base):
+    __tablename__ = "ai_execution_traces"
+
+    id = Column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id = Column(Text, ForeignKey("ai_sessions.id", ondelete="CASCADE"), nullable=False)
+    request_id = Column(String, nullable=False)
+    user_id = Column(String, nullable=False)
+    user_role = Column(String, nullable=False)
+    provider_used = Column(String, nullable=False)
+    model_used = Column(String, nullable=False)
+    provider_fallback = Column(Boolean, nullable=False, default=False)
+    prompt_tokens = Column(Integer, nullable=True)
+    completion_tokens = Column(Integer, nullable=True)
+    total_tokens = Column(Integer, nullable=True)
+    tool_calls_count = Column(Integer, nullable=False, default=0)
+    tools_used = Column(JSONB, nullable=True)
+    latency_ms = Column(Integer, nullable=False)
+    rag_chunks_retrieved = Column(Integer, nullable=True)
+    success = Column(Boolean, nullable=False)
+    error_type = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

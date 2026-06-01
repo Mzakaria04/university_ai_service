@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 import logging
 
-from ai_service.tools.base import ToolResult, ToolDefinition, ToolDomain
+from ai_service.tools.base import ToolResult, ToolDefinition, ToolDomain, ToolParameter
 from ai_service.models.user_context import UserRole
 from ai_service.errors import ToolAuthorizationError
 
@@ -114,12 +114,12 @@ course_attendance_tool_definition = ToolDefinition(
     domain=ToolDomain.DATABASE,
     allowed_roles={UserRole.INSTRUCTOR, UserRole.ADMIN},
     parameters=[
-        {
-            "name": "course_offering_id",
-            "type": "string",
-            "description": "The unique course offering ID to query student attendance summary for.",
-            "required": True
-        }
+        ToolParameter(
+            name="course_offering_id",
+            type="string",
+            description="The unique course offering ID to query student attendance summary for.",
+            required=True
+        )
     ],
     handler=course_attendance_tool_instance.execute,
     timeout_seconds=5.0,
