@@ -12,8 +12,8 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
     PUBLIC_ROUTES = {"/health", "/docs", "/openapi.json", "/redoc"}
 
     async def dispatch(self, request: Request, call_next):
-        # Bypass auth for public routes
-        if request.url.path in self.PUBLIC_ROUTES:
+        # Bypass auth for public routes and internal debug routes
+        if request.url.path in self.PUBLIC_ROUTES or request.url.path.startswith("/internal/debug"):
             return await call_next(request)
 
         # Extract authorization token
@@ -42,11 +42,19 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                     raise InvalidTokenError(f"Missing required claim: {field}")
             
             # Construct and inject the UserContext
-            request.state.user_context = UserContext(
+            user_context = UserContext(
                 user_id=user_data["id"],
                 university_id=user_data["universityId"],
                 full_name=user_data["fullName"],
                 role=UserRole(user_data["role"])
+            )
+            request.state.user_context = user_context
+            
+            # Bind to structlog contextvars
+            import structlog
+            structlog.contextvars.bind_contextvars(
+                user_id=user_context.user_id,
+                role=user_context.role.name if hasattr(user_context.role, "name") else str(user_context.role)
             )
             
         except jwt.ExpiredSignatureError:

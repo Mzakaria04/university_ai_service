@@ -1,4 +1,4 @@
-import logging
+import structlog
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,13 +8,15 @@ from ai_service.config.settings import settings
 from ai_service.db.session import engine, get_db
 from ai_service.middleware.request_id import RequestIdMiddleware
 from ai_service.middleware.auth import JWTAuthMiddleware
+from ai_service.observability.logging import setup_logging
+from ai_service.observability.tracing import setup_tracing, instrument_app
 
-# Configure standard logging
-logging.basicConfig(
-    level=logging.INFO if settings.ENVIRONMENT == "production" else logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger("ai_service")
+# Initialize structured logging
+setup_logging(settings.ENVIRONMENT)
+logger = structlog.get_logger("ai_service")
+
+# Initialize OpenTelemetry Tracing
+setup_tracing(service_name="ai-service", environment=settings.ENVIRONMENT)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -62,7 +64,9 @@ async def lifespan(app: FastAPI):
     
     # Shutdown resources
     logger.info("Shutting down AI service resources...")
+    from ai_service.db.session import readonly_engine
     await engine.dispose()
+    await readonly_engine.dispose()
     logger.info("AI service shutdown complete.")
 
 app = FastAPI(
@@ -70,7 +74,17 @@ app = FastAPI(
     description="Intelligence layer for the University Management System",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url=None if settings.ENVIRONMENT == "production" else "/docs",
+    redoc_url=None if settings.ENVIRONMENT == "production" else "/redoc",
+    openapi_url=None if settings.ENVIRONMENT == "production" else "/openapi.json",
 )
+
+# Instrument app with OpenTelemetry
+instrument_app(app)
+
+# Instrument app with Prometheus metrics
+from prometheus_fastapi_instrumentator import Instrumentator
+Instrumentator().instrument(app).expose(app)
 
 # Register Middlewares (Note: Starlette executes middlewares in reverse order)
 app.add_middleware(JWTAuthMiddleware)
@@ -80,10 +94,12 @@ app.add_middleware(RequestIdMiddleware)
 from ai_service.api.v1.sessions import router as sessions_router
 from ai_service.api.v1.chat import router as chat_router
 from ai_service.api.v1.feedback import router as feedback_router
+from ai_service.api.internal.debug import router as debug_router
 
 app.include_router(sessions_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
 app.include_router(feedback_router, prefix="/api/v1")
+app.include_router(debug_router, prefix="/internal/debug")
 
 # Exception Handlers
 from fastapi.responses import JSONResponse
@@ -118,7 +134,23 @@ async def provider_rate_limit_error_handler(request, exc: ProviderRateLimitError
 
 @app.exception_handler(AIServiceError)
 async def ai_service_error_handler(request, exc: AIServiceError):
+    logger.error("ai_service.error", error=str(exc))
+    if settings.ENVIRONMENT == "production":
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "An unexpected error occurred. Please try again."}
+        )
     return JSONResponse(status_code=500, content={"detail": f"AI Service error: {str(exc)}"})
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request, exc: Exception):
+    logger.exception("request.unhandled_error", error=str(exc))
+    if settings.ENVIRONMENT == "production":
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "An unexpected error occurred. Please try again."}
+        )
+    return JSONResponse(status_code=500, content={"detail": f"Unhandled error: {str(exc)}"})
 
 @app.get("/health", tags=["monitoring"])
 async def health_check(db: AsyncSession = Depends(get_db)):

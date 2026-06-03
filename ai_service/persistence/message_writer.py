@@ -1,3 +1,4 @@
+from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update
 import uuid
@@ -52,6 +53,67 @@ class MessagePersistence:
             session_record.message_count = next_seq
             session_record.last_active_at = func.now()
 
-        await db.commit()
+        try:
+            await db.commit()
+        except Exception as e:
+            import logging
+            debug_logger = logging.getLogger("ai_service.debug")
+            try:
+                # Query all sessions in DB using raw SQL to bypass ORM state issues
+                from sqlalchemy import text
+                res = await db.execute(text("SELECT id, user_id FROM ai_sessions"))
+                sessions_in_db = res.mappings().all()
+                debug_logger.error(f"DEBUG SAVE_MESSAGE ERROR: sessions in DB: {sessions_in_db}, trying to insert session_id: {session_id}")
+            except Exception as query_err:
+                debug_logger.error(f"DEBUG SAVE_MESSAGE ERROR: failed to query sessions: {query_err}")
+            raise e
         await db.refresh(event)
         return event
+
+    @staticmethod
+    async def save_execution_trace(
+        db: AsyncSession,
+        session_id: str,
+        request_id: str,
+        user_id: str,
+        user_role: str,
+        provider_used: str,
+        model_used: str,
+        provider_fallback: bool,
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
+        total_tokens: int | None,
+        tool_calls_count: int,
+        tools_used: list | None,
+        latency_ms: int,
+        rag_chunks_retrieved: int | None,
+        success: bool,
+        error_type: str | None
+    ) -> Any:
+        """
+        Persists a new execution trace to the database.
+        """
+        from ai_service.db.models import AIExecutionTrace
+        trace_record = AIExecutionTrace(
+            id=str(uuid.uuid4()),
+            session_id=session_id,
+            request_id=request_id,
+            user_id=user_id,
+            user_role=user_role,
+            provider_used=provider_used,
+            model_used=model_used,
+            provider_fallback=provider_fallback,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            tool_calls_count=tool_calls_count,
+            tools_used=tools_used,
+            latency_ms=latency_ms,
+            rag_chunks_retrieved=rag_chunks_retrieved,
+            success=success,
+            error_type=error_type
+        )
+        db.add(trace_record)
+        await db.commit()
+        await db.refresh(trace_record)
+        return trace_record

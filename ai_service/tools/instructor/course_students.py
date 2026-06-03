@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 import logging
 
-from ai_service.tools.base import ToolResult, ToolDefinition, ToolDomain
+from ai_service.tools.base import ToolResult, ToolDefinition, ToolDomain, ToolParameter
 from ai_service.models.user_context import UserRole
 from ai_service.errors import ToolAuthorizationError
 
@@ -10,8 +10,8 @@ logger = logging.getLogger("ai_service.tools.course_students")
 
 class GetCourseStudentsTool:
     """
-    Tool implementation to retrieve a student roster for a course section.
-    Enforces instructor assignment checks; ADMIN role has broad access.
+    Tool implementation to retrieve the student roster for a course offering section.
+    Instructors can only access sections they teach. Admins can access any section.
     """
 
     async def execute(self, db: AsyncSession, user_id: str, course_offering_id: str) -> ToolResult:
@@ -30,33 +30,34 @@ class GetCourseStudentsTool:
 
             role_str = str(role).upper()
 
-            # 2. Contextual authorization check for instructors
+            # 2. Authorization & Context check
             if role_str == "INSTRUCTOR":
-                ci_query = text("""
+                check_query = text("""
                     SELECT 1 FROM "CourseInstructor" 
-                    WHERE "courseOfferingId" = :course_offering_id 
-                      AND "instructorId" = :user_id
+                    WHERE "instructorId" = :user_id AND "courseOfferingId" = :course_offering_id
                 """)
-                ci_res = await db.execute(ci_query, {"course_offering_id": course_offering_id, "user_id": user_id})
-                if not ci_res.scalar():
+                check_res = await db.execute(check_query, {"user_id": user_id, "course_offering_id": course_offering_id})
+                if not check_res.scalar():
                     raise ToolAuthorizationError(
-                        f"Instructor {user_id} is not authorized to access course offering {course_offering_id}."
+                        f"Instructor {user_id} is not assigned to course offering {course_offering_id}."
                     )
-            elif role_str != "ADMIN":
-                raise ToolAuthorizationError(f"Role {role_str} is not authorized to use get_course_students.")
+            elif role_str == "ADMIN":
+                # Admins have global access
+                pass
+            else:
+                raise ToolAuthorizationError(f"Role {role_str} is not authorized to retrieve course students.")
 
             # 3. Retrieve student roster
             query = text("""
                 SELECT 
                     u.id AS student_id,
-                    u."fullName" AS student_name,
                     u."universityId" AS university_id,
+                    u."fullName" AS full_name,
                     e.status AS enrollment_status
                 FROM "Enrollment" e
                 JOIN "User" u ON e."studentId" = u.id
                 WHERE e."courseOfferingId" = :course_offering_id
                 ORDER BY u."fullName"
-                LIMIT 100
             """)
             
             result = await db.execute(query, {"course_offering_id": course_offering_id})
@@ -66,14 +67,19 @@ class GetCourseStudentsTool:
             for r in rows:
                 students.append({
                     "student_id": r["student_id"],
-                    "student_name": r["student_name"],
                     "university_id": r["university_id"],
-                    "enrollment_status": r["enrollment_status"]
+                    "full_name": r["full_name"],
+                    "student_name": r["full_name"],
+                    "enrollment_status": str(r["enrollment_status"]) if r["enrollment_status"] is not None else None
                 })
 
             return ToolResult(
                 success=True,
-                data={"course_offering_id": course_offering_id, "students": students}
+                data={
+                    "course_offering_id": course_offering_id,
+                    "student_count": len(students),
+                    "students": students
+                }
             )
 
         except ToolAuthorizationError as e:
@@ -83,7 +89,7 @@ class GetCourseStudentsTool:
             return ToolResult(
                 success=False,
                 data=None,
-                error_message=f"Failed to query course roster: {str(e)}"
+                error_message=f"Failed to query course student roster: {str(e)}"
             )
 
 # Tool definition mapping
@@ -100,12 +106,12 @@ course_students_tool_definition = ToolDefinition(
     domain=ToolDomain.DATABASE,
     allowed_roles={UserRole.INSTRUCTOR, UserRole.ADMIN},
     parameters=[
-        {
-            "name": "course_offering_id",
-            "type": "string",
-            "description": "The unique course offering ID to query student roster for.",
-            "required": True
-        }
+        ToolParameter(
+            name="course_offering_id",
+            type="string",
+            description="The unique course offering ID to query student roster for.",
+            required=True
+        )
     ],
     handler=course_students_tool_instance.execute,
     timeout_seconds=5.0,

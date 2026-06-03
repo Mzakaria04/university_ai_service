@@ -8,19 +8,17 @@ from ai_service.tools.base import ToolDefinition
 from ai_service.providers.base import LLMProvider, LLMResponse
 from ai_service.errors import ProviderUnavailableError, ProviderTimeoutError, ProviderRateLimitError
 
-logger = logging.getLogger("ai_service.providers.openrouter")
+logger = logging.getLogger("ai_service.providers.groq")
 
-class OpenRouterProvider(LLMProvider):
-    MODEL = "z-ai/glm-4.5-air:free"
-    BASE_URL = "https://openrouter.ai/api/v1"
+class GroqProvider(LLMProvider):
+    MODEL = "llama-3.3-70b-versatile"
+    BASE_URL = "https://api.groq.com/openai/v1"
 
     def __init__(self):
-        self.api_key = settings.OPENROUTER_API_KEY
+        self.api_key = settings.GROQ_API_KEY
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/google-deepmind/antigravity",
-            "X-Title": "University AI Assistant",
         }
 
     @property
@@ -38,7 +36,7 @@ class OpenRouterProvider(LLMProvider):
         stream: bool = True
     ) -> LLMResponse:
         """
-        Sends historical messages and authorized tools to OpenRouter chat completion.
+        Sends historical messages and authorized tools to Groq API.
         If the model decides to call a tool, the streaming chunks are accumulated internally
         to assemble the complete tool call. Otherwise, text chunks are streamed dynamically.
         """
@@ -47,7 +45,7 @@ class OpenRouterProvider(LLMProvider):
         tracer = get_tracer()
 
         with tracer.start_as_current_span("llm_provider_chat") as span:
-            span.set_attribute("provider.name", "openrouter")
+            span.set_attribute("provider.name", "groq")
             span.set_attribute("provider.model", self.MODEL)
             span.set_attribute("provider.stream", stream)
 
@@ -74,11 +72,11 @@ class OpenRouterProvider(LLMProvider):
                 ):
                     with attempt:
                         if not stream:
-                            # Static chat completion
+                            # Static completion
                             resp = await client.post(f"{self.BASE_URL}/chat/completions", headers=self.headers, json=payload)
                             self._check_status_errors(resp)
                         else:
-                            # Streaming chat completion
+                            # Streaming completion
                             request = client.build_request("POST", f"{self.BASE_URL}/chat/completions", headers=self.headers, json=payload)
                             resp = await client.send(request, stream=True)
                             self._check_status_errors(resp)
@@ -96,41 +94,41 @@ class OpenRouterProvider(LLMProvider):
                     result = await self._process_stream(resp, client)
                     span.set_status(trace.StatusCode.OK)
 
-                result.provider_name = "openrouter"
+                result.provider_name = "groq"
                 result.model_name = self.MODEL
                 result.provider_fallback = False
                 return result
 
             except httpx.TimeoutException as e:
                 await client.aclose()
-                logger.error(f"OpenRouter timeout: {e}")
+                logger.error(f"Groq timeout: {e}")
                 span.record_exception(e)
                 span.set_status(trace.StatusCode.ERROR, str(e))
-                raise ProviderTimeoutError(f"OpenRouter request timed out: {e}")
+                raise ProviderTimeoutError(f"Groq request timed out: {e}")
             except httpx.HTTPStatusError as e:
                 await client.aclose()
-                logger.error(f"OpenRouter HTTP error {e.response.status_code}")
+                logger.error(f"Groq HTTP error {e.response.status_code}: {e.response.text}")
                 span.record_exception(e)
                 span.set_status(trace.StatusCode.ERROR, str(e))
-                raise ProviderUnavailableError(f"OpenRouter HTTP error: {e.response.status_code}")
+                raise ProviderUnavailableError(f"Groq HTTP error: {e}")
             except Exception as e:
                 await client.aclose()
                 if not isinstance(e, (ProviderRateLimitError, ProviderTimeoutError, ProviderUnavailableError)):
-                    logger.error(f"OpenRouter error: {e}")
+                    logger.error(f"Groq error: {e}")
                 span.record_exception(e)
                 span.set_status(trace.StatusCode.ERROR, str(e))
                 if isinstance(e, (ProviderRateLimitError, ProviderTimeoutError, ProviderUnavailableError)):
                     raise e
-                raise ProviderUnavailableError(f"Failed to call OpenRouter: {e}")
+                raise ProviderUnavailableError(f"Failed to call Groq: {e}")
 
     async def complete(self, prompt: str, max_tokens: int = 512) -> str:
-        """Simple completion for utility runs (like summarization)."""
+        """Simple completion for utility runs."""
         from ai_service.observability.tracing import get_tracer
         from opentelemetry import trace
         tracer = get_tracer()
 
         with tracer.start_as_current_span("llm_provider_complete") as span:
-            span.set_attribute("provider.name", "openrouter")
+            span.set_attribute("provider.name", "groq")
             span.set_attribute("provider.model", self.MODEL)
 
             payload = {
@@ -161,26 +159,26 @@ class OpenRouterProvider(LLMProvider):
                     span.set_status(trace.StatusCode.ERROR, str(e))
                     raise e
                 except httpx.TimeoutException as e:
-                    logger.error(f"OpenRouter complete timeout: {e}")
+                    logger.error(f"Groq complete timeout: {e}")
                     span.record_exception(e)
                     span.set_status(trace.StatusCode.ERROR, str(e))
-                    raise ProviderTimeoutError(f"OpenRouter complete timed out: {e}")
+                    raise ProviderTimeoutError(f"Groq complete timed out: {e}")
                 except Exception as e:
-                    logger.error(f"OpenRouter complete error: {e}")
+                    logger.error(f"Groq complete error: {e}")
                     span.record_exception(e)
                     span.set_status(trace.StatusCode.ERROR, str(e))
-                    raise ProviderUnavailableError(f"OpenRouter complete failed: {e}")
+                    raise ProviderUnavailableError(f"Groq complete failed: {e}")
 
     def _check_status_errors(self, response: httpx.Response):
         """Raises standard Provider errors based on HTTP status codes."""
         if response.status_code == 429:
-            raise ProviderRateLimitError("OpenRouter API rate limit reached")
+            raise ProviderRateLimitError("Groq API rate limit reached")
         if response.status_code >= 500:
-            raise ProviderUnavailableError(f"OpenRouter server error (status: {response.status_code})")
+            raise ProviderUnavailableError(f"Groq server error (status: {response.status_code})")
         response.raise_for_status()
 
     def _parse_static_response(self, data: dict[str, Any]) -> LLMResponse:
-        """Parses a non-streaming JSON response from OpenRouter."""
+        """Parses a non-streaming JSON response from Groq."""
         choice = data["choices"][0]
         message = choice["message"]
         content = message.get("content") or ""

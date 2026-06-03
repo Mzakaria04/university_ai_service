@@ -3,7 +3,7 @@ import json
 import httpx
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from ai_service.providers.openrouter import OpenRouterProvider
+from ai_service.providers.groq import GroqProvider
 from ai_service.models.messages import Message
 from ai_service.tools.base import ToolDefinition, ToolDomain
 from ai_service.models.user_context import UserRole
@@ -15,7 +15,6 @@ pytestmark = pytest.mark.anyio
 def anyio_backend():
     return "asyncio"
 
-
 def mock_response(status_code: int, json_data: dict = None, content: bytes = b"") -> httpx.Response:
     """Helper to create a mock httpx.Response."""
     resp = MagicMock(spec=httpx.Response)
@@ -26,17 +25,15 @@ def mock_response(status_code: int, json_data: dict = None, content: bytes = b""
     else:
         resp.content = content
     
-    # Mock status check raising HTTPStatusError on error codes
     def raise_for_status():
         if 400 <= status_code < 600:
             raise httpx.HTTPStatusError(message="HTTP Error", request=MagicMock(), response=resp)
     resp.raise_for_status.side_effect = raise_for_status
     return resp
 
-
 async def test_complete_success():
     """Verify that complete() returns text response successfully."""
-    provider = OpenRouterProvider()
+    provider = GroqProvider()
     mock_resp = mock_response(200, {"choices": [{"message": {"content": "Summary text"}}]})
     
     with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
@@ -45,15 +42,13 @@ async def test_complete_success():
         result = await provider.complete("Summarize this")
         assert result == "Summary text"
         mock_post.assert_called_once()
-        # Verify model and payload
         args, kwargs = mock_post.call_args
-        assert kwargs["json"]["model"] == OpenRouterProvider.MODEL
+        assert kwargs["json"]["model"] == "llama-3.3-70b-versatile"
         assert kwargs["json"]["messages"][0]["content"] == "Summarize this"
-
 
 async def test_chat_static_text_success():
     """Verify that non-streaming chat yields text content."""
-    provider = OpenRouterProvider()
+    provider = GroqProvider()
     mock_resp = mock_response(200, {
         "choices": [{
             "message": {
@@ -70,10 +65,9 @@ async def test_chat_static_text_success():
         assert response.content == "Hello student!"
         assert len(response.tool_calls) == 0
 
-
 async def test_chat_static_tool_call_success():
     """Verify that non-streaming chat parses tool calls correctly."""
-    provider = OpenRouterProvider()
+    provider = GroqProvider()
     mock_resp = mock_response(200, {
         "choices": [{
             "message": {
@@ -100,18 +94,14 @@ async def test_chat_static_tool_call_success():
         assert response.tool_calls[0].name == "get_my_gpa"
         assert response.tool_calls[0].id == "call_gpa_123"
 
-
 async def test_chat_streaming_text_success():
     """Verify that streaming text chunks yields content chunk-by-chunk."""
-    provider = OpenRouterProvider()
+    provider = GroqProvider()
     
-    # Mocking standard HTTPX stream responses
     mock_client = MagicMock(spec=httpx.AsyncClient)
-    
     mock_resp = MagicMock(spec=httpx.Response)
     mock_resp.status_code = 200
     
-    # Setup mock iterator yielding text lines in SSE format
     async def mock_aiter_lines():
         chunks = [
             'data: {"choices": [{"delta": {"content": "Hello"}}]}',
@@ -133,22 +123,19 @@ async def test_chat_streaming_text_success():
         response = await provider.chat([Message(role="user", content="Hi")], stream=True)
         assert len(response.tool_calls) == 0
         
-        # Read from the stream iterator
         streamed_chunks = []
         async for chunk in response.stream():
             streamed_chunks.append(chunk)
             
         assert "".join(streamed_chunks) == "Hello world!"
 
-
 async def test_chat_streaming_tool_calls():
     """Verify that streaming tool call chunks are accumulated and return ToolCall list."""
-    provider = OpenRouterProvider()
+    provider = GroqProvider()
     mock_client = MagicMock(spec=httpx.AsyncClient)
     mock_resp = MagicMock(spec=httpx.Response)
     mock_resp.status_code = 200
     
-    # Setup mock iterator yielding tool call chunks
     async def mock_aiter_lines():
         chunks = [
             'data: {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_1", "function": {"name": "get_my"}}]}}]}',
@@ -170,25 +157,22 @@ async def test_chat_streaming_tool_calls():
     with patch("httpx.AsyncClient", return_value=mock_client):
         response = await provider.chat([Message(role="user", content="What is my GPA?")], stream=True)
         
-        # Tool calls should be resolved
         assert len(response.tool_calls) == 1
         assert response.tool_calls[0].name == "get_my_gpa"
         assert response.tool_calls[0].id == "call_1"
         assert response.tool_calls[0].arguments == {"user_id": 1}
 
-
-async def test_openrouter_timeout_exception():
+async def test_groq_timeout_exception():
     """Verify that httpx timeout maps to ProviderTimeoutError."""
-    provider = OpenRouterProvider()
+    provider = GroqProvider()
     
     with patch("httpx.AsyncClient.post", side_effect=httpx.TimeoutException("Timeout")):
         with pytest.raises(ProviderTimeoutError):
             await provider.complete("Prompt")
 
-
-async def test_openrouter_rate_limit_exception():
+async def test_groq_rate_limit_exception():
     """Verify that HTTP 429 maps to ProviderRateLimitError."""
-    provider = OpenRouterProvider()
+    provider = GroqProvider()
     mock_resp = mock_response(429)
     
     with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:

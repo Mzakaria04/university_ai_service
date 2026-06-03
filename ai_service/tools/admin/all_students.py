@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 import logging
 
-from ai_service.tools.base import ToolResult, ToolDefinition, ToolDomain
+from ai_service.tools.base import ToolResult, ToolDefinition, ToolDomain, ToolParameter
 from ai_service.models.user_context import UserRole
 from ai_service.errors import ToolAuthorizationError
 
@@ -131,18 +131,18 @@ all_students_tool_definition = ToolDefinition(
     domain=ToolDomain.DATABASE,
     allowed_roles={UserRole.ADMIN},
     parameters=[
-        {
-            "name": "limit",
-            "type": "integer",
-            "description": "Maximum number of students to return (default 50, max 100).",
-            "required": False
-        },
-        {
-            "name": "offset",
-            "type": "integer",
-            "description": "Number of students to skip for pagination (default 0).",
-            "required": False
-        }
+        ToolParameter(
+            name="limit",
+            type="integer",
+            description="Maximum number of students to return (default 50, max 100).",
+            required=False
+        ),
+        ToolParameter(
+            name="offset",
+            type="integer",
+            description="Number of students to skip for pagination (default 0).",
+            required=False
+        )
     ],
     handler=all_students_tool_instance.execute,
     timeout_seconds=5.0,

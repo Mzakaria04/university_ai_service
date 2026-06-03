@@ -8,11 +8,23 @@ class LLMResponse:
         self,
         content: str = "",
         tool_calls: list[ToolCall] | None = None,
-        stream_iterator: AsyncIterator[str] | None = None
+        stream_iterator: AsyncIterator[str] | None = None,
+        provider_name: str = "unknown",
+        model_name: str = "unknown",
+        provider_fallback: bool = False,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        total_tokens: int | None = None
     ):
         self.content = content
         self.tool_calls = tool_calls or []
         self._stream_iterator = stream_iterator
+        self.provider_name = provider_name
+        self.model_name = model_name
+        self.provider_fallback = provider_fallback
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.total_tokens = total_tokens
 
     async def stream(self) -> AsyncIterator[str]:
         """Yields text chunks if streaming is enabled."""

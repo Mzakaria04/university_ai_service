@@ -12,6 +12,11 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         # Store in request state for downstream handlers
         request.state.request_id = request_id
         
+        # Bind to structlog contextvars
+        import structlog
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(request_id=request_id)
+        
         # Process the request
         response = await call_next(request)
         
