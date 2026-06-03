@@ -14,7 +14,7 @@ class GetStudentProgressTool:
     Instructors can only query sections they teach. Admins have global access.
     """
 
-    async def execute(self, db: AsyncSession, user_id: str, student_id: str, course_offering_id: str) -> ToolResult:
+    async def execute(self, db: AsyncSession, user_id: str, university_id: str, course_offering_id: str) -> ToolResult:
         try:
             # 1. Determine user role in database
             role_query = text('SELECT role FROM "User" WHERE id = :user_id')
@@ -47,10 +47,20 @@ class GetStudentProgressTool:
             else:
                 raise ToolAuthorizationError(f"Role {role_str} is not authorized to retrieve student progress.")
 
-            # 3. Retrieve student's full name
-            student_name_query = text('SELECT "fullName" FROM "User" WHERE id = :student_id')
-            student_name_res = await db.execute(student_name_query, {"student_id": student_id})
-            student_name = student_name_res.scalar() or "Unknown Student"
+            # 3. Resolve student_id and student_name from university_id
+            student_query = text('SELECT id, "fullName" FROM "User" WHERE "universityId" = :university_id AND role = \'STUDENT\'')
+            student_res = await db.execute(student_query, {"university_id": university_id})
+            student_row = student_res.mappings().first()
+
+            if not student_row:
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    error_message=f"Student with university ID {university_id} not found."
+                )
+
+            student_id = student_row["id"]
+            student_name = student_row["fullName"]
 
             # 4. Retrieve student grades/record
             query = text("""
@@ -121,9 +131,9 @@ student_progress_tool_definition = ToolDefinition(
     allowed_roles={UserRole.INSTRUCTOR, UserRole.ADMIN},
     parameters=[
         ToolParameter(
-            name="student_id",
+            name="university_id",
             type="string",
-            description="The unique student ID (UUID) to query progress for.",
+            description="The student's unique university registration ID (e.g. 20261111) to query progress for.",
             required=True
         ),
         ToolParameter(

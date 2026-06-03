@@ -340,7 +340,7 @@ async def test_get_student_progress_authorized_instructor(db_session):
     executor = ToolExecutor(db_session)
     result = await executor.execute(
         "get_student_progress",
-        {"student_id": "alice-student-111", "course_offering_id": "co-math-1"},
+        {"university_id": "20261111", "course_offering_id": "co-math-1"},
         instructor_ctx
     )
 
@@ -368,7 +368,7 @@ async def test_get_student_progress_unauthorized_instructor(db_session):
     with pytest.raises(ToolAuthorizationError):
         await executor.execute(
             "get_student_progress",
-            {"student_id": "alice-student-111", "course_offering_id": "co-math-1"},
+            {"university_id": "20261111", "course_offering_id": "co-math-1"},
             instructor_ctx
         )
 
@@ -384,7 +384,7 @@ async def test_get_student_progress_admin(db_session):
     executor = ToolExecutor(db_session)
     result = await executor.execute(
         "get_student_progress",
-        {"student_id": "alice-student-111", "course_offering_id": "co-math-1"},
+        {"university_id": "20261111", "course_offering_id": "co-math-1"},
         admin_ctx
     )
 

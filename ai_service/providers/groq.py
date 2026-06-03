@@ -201,13 +201,19 @@ class GroqProvider(LLMProvider):
         return LLMResponse(content=content, tool_calls=tool_calls)
 
     async def _process_stream(self, response: httpx.Response, client: httpx.AsyncClient) -> LLMResponse:
-        """Parses streaming chunks."""
+        """
+        Parses streaming chunks.
+        Consumes the entire stream first.
+        If any tool calls are found, returns the LLMResponse with tool_calls.
+        Otherwise, yields the accumulated content chunks dynamically.
+        """
         lines_iterator = response.aiter_lines()
         
-        first_content_chunk = ""
-        tool_calls_accumulator = {}
+        buffered_content = []
+        tool_calls_accumulator = {}  # index -> {id, name, arguments}
         is_tool_call = False
         
+        # Consume the entire stream
         async for line in lines_iterator:
             if not line.strip() or line.strip() == "data: [DONE]":
                 continue
@@ -219,40 +225,24 @@ class GroqProvider(LLMProvider):
                         continue
                     delta = choices[0].get("delta", {})
                     
+                    # Track if any tool call delta is seen
                     if "tool_calls" in delta:
                         is_tool_call = True
                         self._accumulate_tool_calls(delta["tool_calls"], tool_calls_accumulator)
                     
+                    # Accumulate content chunks
                     if "content" in delta and delta["content"]:
-                        first_content_chunk = delta["content"]
-                        break
+                        buffered_content.append(delta["content"])
                         
-                    if is_tool_call:
-                        pass
                 except Exception as e:
-                    logger.debug(f"Error parsing line in stream initialization: {e}")
+                    logger.debug(f"Error parsing line in stream: {e}")
                     
-            if is_tool_call:
-                continue
-
+        # Close connection resources
+        await response.aclose()
+        await client.aclose()
+        
         if is_tool_call:
-            async for line in lines_iterator:
-                if not line.strip() or line.strip() == "data: [DONE]":
-                    continue
-                if line.startswith("data: "):
-                    try:
-                        data = json.loads(line[6:])
-                        choices = data.get("choices", [])
-                        if choices:
-                            delta = choices[0].get("delta", {})
-                            if "tool_calls" in delta:
-                                self._accumulate_tool_calls(delta["tool_calls"], tool_calls_accumulator)
-                    except Exception:
-                        pass
-            
-            await response.aclose()
-            await client.aclose()
-            
+            # Parse accumulated tool calls
             final_tool_calls = []
             for index, tc_data in sorted(tool_calls_accumulator.items()):
                 try:
@@ -264,29 +254,15 @@ class GroqProvider(LLMProvider):
                     name=tc_data["name"],
                     arguments=args if isinstance(args, dict) else {}
                 ))
-            return LLMResponse(content="", tool_calls=final_tool_calls)
-
+            
+            # Combine content if any pre-tool text was produced
+            combined_content = "".join(buffered_content)
+            return LLMResponse(content=combined_content, tool_calls=final_tool_calls)
+            
+        # If it's a normal text response, return generator yielding accumulated chunks
         async def text_generator() -> AsyncIterator[str]:
-            try:
-                if first_content_chunk:
-                    yield first_content_chunk
-                    
-                async for line in lines_iterator:
-                    if not line.strip() or line.strip() == "data: [DONE]":
-                        continue
-                    if line.startswith("data: "):
-                        try:
-                            data = json.loads(line[6:])
-                            choices = data.get("choices", [])
-                            if choices:
-                                delta = choices[0].get("delta", {})
-                                if "content" in delta and delta["content"]:
-                                    yield delta["content"]
-                        except Exception:
-                            pass
-            finally:
-                await response.aclose()
-                await client.aclose()
+            for chunk in buffered_content:
+                yield chunk
 
         return LLMResponse(content="", tool_calls=[], stream_iterator=text_generator())
 
